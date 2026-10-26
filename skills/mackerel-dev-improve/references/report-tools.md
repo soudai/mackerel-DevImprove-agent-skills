@@ -1,5 +1,7 @@
 # レポート変換・投稿ツール
 
+Mackerelからの観測結果取得、品質bundle比較、ダッシュボード生成は[観測・比較・可視化CLI](observation-tools.md)を参照する。この文書はnormalize/publishの入力・投稿契約を扱う。
+
 同梱スクリプトはPython 3.11以上の標準ライブラリだけを使う。CIではLinux/WindowsとPython 3.11/3.13を組み合わせる。各プロジェクトでランナーを実行し、生レポート、実行版、終了コード、測定時刻を収集した後に使う。スクリプトはテストやCCCC自体を実行しない。広い計測方針は[計測契約](measurement-contract.md)、現在の実装範囲はこの文書を正本とする。導入先の構成確認とCIへの接続は[導入手順](project-adoption.md)を使う。
 
 以下の`python3`は環境に応じて`python`または`py -3`へ置き換えられる。run内のファイルパスはrun JSON基準であり、起動ディレクトリに依存しない。YAMLの設計例をCLIへ渡さない。設計契約・project設定・run・共通JSONは別の形式であり、`schema_version`の数値が同じだけでは交換できない。
