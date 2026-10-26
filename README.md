@@ -19,6 +19,8 @@ Mackerelを活用した開発改善のためのagent Skillsを保存するリポ
 - [レポート変換・投稿CLI](skills/mackerel-dev-improve/references/report-tools.md)：対応範囲、JSON設定、実行手順、検証方法
 - [他リポジトリへの導入](skills/mackerel-dev-improve/references/project-adoption.md)：適合確認、CI接続、導入完了の条件
 - [共通テストJSON](skills/mackerel-dev-improve/references/portable-tests.md)：言語・ランナー別converterの入力契約
+- [観測・比較・可視化CLI](skills/mackerel-dev-improve/references/observation-tools.md)：Mackerelのサービスメトリックス・APM・ログ取得、品質bundle比較、Dashboard API用JSON生成
+- [検証済みCollector設定](skills/mackerel-dev-improve/references/observability-setup.md)：APM・ログ・メトリックスの送信とCollector内部監視
 
 ## 利用
 
@@ -57,7 +59,11 @@ Skillの手順・計測仕様に加え、PHPUnit 12.5のJUnit XML、moznion/cccc
 
 CLIはPython 3.11以上の標準ライブラリで動作します。CIではLinux/WindowsとPython 3.11/3.13の組合せを検証します。依存するアプリ言語やCIサービスは固定しません。
 
-Mackerelへの投稿は[投稿スクリプト](skills/mackerel-dev-improve/scripts/publish.py)で行います。[レポートツールの利用手順](skills/mackerel-dev-improve/references/report-tools.md)で、CIの単一publisher、秘密管理、API読戻しの条件を確認してください。OTelの導入、未対応ランナーの変換、ダッシュボード適用は対象プロジェクトで設定します。スクリプトのテスト合格だけを、利用先の実データ投稿やダッシュボード表示の検証済みとは扱いません。
+Mackerelへの投稿は[投稿スクリプト](skills/mackerel-dev-improve/scripts/publish.py)で行います。[レポートツールの利用手順](skills/mackerel-dev-improve/references/report-tools.md)で、CIの単一publisher、秘密管理、API読戻しの条件を確認してください。
+
+追加の[観測・比較・可視化CLI](skills/mackerel-dev-improve/references/observation-tools.md)で、Mackerelのサービスメトリックス、HTTP/DB APM統計、trace ID付きログを範囲を限定して取得できます。ログの環境・versionを照合し、欠測・取得上限を完全な結果にしません。品質bundleの前後比較では、計測定義・対象集団・明細の整合性を確認し、テスト失敗を複雑度の低下で隠さず判定します。ダッシュボードJSONは単位を分けたwidgetと証拠へのリンクを生成します。
+
+[Collector設定例](skills/mackerel-dev-improve/assets/otel-collector.example.yaml)はContrib 0.163.2で構文とローカル結合動作を検証しています。対象プロジェクトではアプリの計装、秘密値の除去、サービス対応、APIキー、未対応ランナーのconverter、ダッシュボード適用を設定します。スクリプトのテスト合格だけを、利用先のMackerel実データ取得・投稿やダッシュボード表示の検証済みとは扱いません。カバレッジ・変更頻度・retry台帳・性能比較の自動判定は引き続き設計段階です。
 
 送信先は通常`--expected-org`で固定します。利用者がキーの所属先を選ぶと明示した場合は`--use-key-organization`を使えます。所属名はプロセス内部だけで照合し、ログや成果物へ出力しません。この指定では、将来キーの所属先が変われば送信先も変わります。詳しくは[投稿手順](skills/mackerel-dev-improve/references/report-tools.md#mackerelへの投稿)を参照してください。
 
