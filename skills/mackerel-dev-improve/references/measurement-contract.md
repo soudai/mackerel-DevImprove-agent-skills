@@ -1,6 +1,6 @@
 # 計測契約
 
-このファイルはSkill独自の正規化仕様。OTel Semantic ConventionsやMackerelの既製機能と区別する。
+このファイルはSkill独自の広い計測設計。OTel Semantic ConventionsやMackerelの既製機能と区別する。同梱CLIが受理・出力する厳密な形式と対応範囲は[report-tools.md](report-tools.md)を参照する。以下の設計表をそのままCLIのJSONスキーマとして使わない。
 
 ## 二つの経路
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Normalize PHPUnit 12.5 JUnit and moznion/cccc 1.8.3 reports (stdlib only).
+"""Normalize test-cases/v1, PHPUnit 12.5 JUnit and CCCC 1.8.3 (stdlib only).
 
 Paths in the run manifest are relative to that manifest, not the working directory.
-This deliberately supports one complete, non-retrying PHPUnit invocation per
-profile. It does not infer retry, execution, coverage or defect measurements.
+Test profiles support one non-retrying invocation. The portable JSON contract
+lets validated runner-specific converters use the same measurement pipeline.
+It does not infer retry, execution, coverage or defect measurements.
 """
 
 import argparse
@@ -18,7 +19,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-ADAPTER_VERSION = "1"
+ADAPTER_VERSION = "2"
 MAX_REPORT_BYTES = 64 * 1024 * 1024
 PROFILE_RE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 REVISION_RE = re.compile(r"(?:[a-f0-9]{40}|[a-f0-9]{64})\Z")
@@ -35,6 +36,12 @@ def require(condition, message):
 
 def integer(value):
     return type(value) is int and 0 <= value <= 2 ** 53 - 1
+
+
+def process_exit_code(value):
+    # POSIX subprocess APIs use negative signal numbers; Windows can expose
+    # unsigned 32-bit termination codes. Neither is a completed test plan.
+    return type(value) is int and -(2 ** 31) <= value <= 2 ** 32 - 1
 
 
 def finite_number(value):
@@ -120,13 +127,24 @@ def validate_config(config):
         require(PROFILE_RE.fullmatch(name) is not None, "invalid profile name")
         require(isinstance(profile, dict), "invalid profile configuration")
         kind = profile.get("kind")
-        require(kind in ("junit", "cccc"), "unsupported profile kind")
+        require(kind in ("junit", "test_cases", "cccc"), "unsupported profile kind")
+        require(isinstance(profile.get("selection"), str) and profile["selection"].strip(),
+                "profile must name its fixed selection")
         if kind == "junit":
             require(profile.get("producer") == "phpunit"
                     and re.fullmatch(r"12\.5\.[0-9]+", str(profile.get("version"))),
                     "JUnit adapter supports phpunit 12.5.x only")
-            require(isinstance(profile.get("selection"), str) and profile["selection"],
-                    "JUnit profile must name its fixed selection")
+        elif kind == "test_cases":
+            require(profile.get("contract") == "test-cases/v1", "unsupported test cases contract")
+            for field in ("producer", "version"):
+                require(isinstance(profile.get(field), str) and profile[field].strip(),
+                        "test cases profile must pin producer and version")
+            validate_tool_identity(profile.get("converter"), "converter")
+            codes = profile.get("completed_exit_codes")
+            require(isinstance(codes, list) and codes and len(codes) <= 16
+                    and all(process_exit_code(code) and code >= 0 for code in codes)
+                    and len(set(codes)) == len(codes) and 0 in codes,
+                    "completed_exit_codes must be unique nonnegative codes including zero")
         else:
             require(profile.get("producer") == "moznion/cccc"
                     and profile.get("version") == "1.8.3",
@@ -153,7 +171,7 @@ def validate_run(run, config):
     require(isinstance(run.get("profiles"), dict), "run profiles must be a map")
     require(set(run["profiles"]) <= set(config["profiles"]),
             "run contains a profile absent from the fixed config allowlist")
-    require(run.get("test_wrapper_exit_code") is None or integer(run["test_wrapper_exit_code"]),
+    require(run.get("test_wrapper_exit_code") is None or process_exit_code(run["test_wrapper_exit_code"]),
             "invalid test wrapper exit code")
 
 
@@ -221,6 +239,46 @@ def junit_report(data):
                 require(re.fullmatch(r"[0-9]{1,16}", root.get(field)) and int(root.get(field)) == value,
                         "JUnit root summary disagrees with cases")
     return cases
+
+
+def validate_tool_identity(value, label):
+    require(isinstance(value, dict) and set(value) == {"name", "version"}
+            and all(isinstance(value[field], str) and value[field].strip()
+                    for field in ("name", "version")),
+            "invalid " + label + " identity")
+
+
+def test_cases_report(data, profile, expected_cases):
+    """Read a conservative interchange contract, never arbitrary JUnit dialects."""
+    report = parse_json(data)
+    require(isinstance(report, dict)
+            and set(report) == {"schema_version", "producer", "converter", "cases"},
+            "test cases report has missing or unsupported fields")
+    require(type(report["schema_version"]) is int and report["schema_version"] == 1,
+            "test cases schema_version must be 1")
+    validate_tool_identity(report["producer"], "producer")
+    validate_tool_identity(report["converter"], "converter")
+    require(report["producer"] == {"name": profile["producer"], "version": profile["version"]}
+            and report["converter"] == profile["converter"],
+            "test cases producer or converter differs from the pinned profile")
+    require(integer(expected_cases) and expected_cases > 0,
+            "test cases require a positive independently collected expected_cases count")
+    require(isinstance(report["cases"], list) and len(report["cases"]) == expected_cases,
+            "test cases report disagrees with the selected case count")
+    records = []
+    seen = set()
+    for case in report["cases"]:
+        require(isinstance(case, dict) and set(case) == {"id", "status"},
+                "test case has missing or unsupported fields")
+        require(isinstance(case["id"], str) and case["id"].strip(), "test case identity is missing")
+        require(case["id"] not in seen, "duplicate test case identity")
+        seen.add(case["id"])
+        require(isinstance(case["status"], str)
+                and case["status"] in ("passed", "failed", "error", "skipped"),
+                "unsupported test case status")
+        records.append({"entity_id": digest(json_bytes(["test-cases/v1", case["id"]])),
+                        "entity_kind": "test_case", "status": case["status"]})
+    return records
 
 
 def percentile(values, fraction):
@@ -306,8 +364,9 @@ def cccc_report(data, expected_files):
     return functions, summary, diagnostics
 
 
-def normalize_profile(name, profile, entry, run_dir, measured_at, wrapper_exit_code=None):
-    family = "tests" if profile["kind"] == "junit" else "cccc"
+def normalize_profile(name, profile, entry, run_dir, measured_at, wrapper_exit_code=None,
+                      run_started_at=None):
+    family = "tests" if profile["kind"] in ("junit", "test_cases") else "cccc"
     prefix = family + "." + name + "."
     metrics = []
     details = {"status": "missing", "records": [], "unsupported_metrics": []}
@@ -319,8 +378,8 @@ def normalize_profile(name, profile, entry, run_dir, measured_at, wrapper_exit_c
     exit_code = entry.get("exit_code")
     gate_exit = entry.get("gate_exit_code")
     try:
-        require(exit_code is None or integer(exit_code), "invalid process exit code")
-        require(gate_exit is None or integer(gate_exit), "invalid gate exit code")
+        require(exit_code is None or process_exit_code(exit_code), "invalid process exit code")
+        require(gate_exit is None or process_exit_code(gate_exit), "invalid gate exit code")
         collection.update(exit_code=exit_code, gate_exit_code=gate_exit)
         path_value = entry.get("report")
         require(isinstance(path_value, str) and path_value, "report path is missing")
@@ -342,16 +401,34 @@ def normalize_profile(name, profile, entry, run_dir, measured_at, wrapper_exit_c
                     "sidecar checksum mismatch")
         collection["status"] = "partial"
         if family == "tests":
-            cases = junit_report(data)
+            require(("started_at" in entry) == ("finished_at" in entry),
+                    "profile timestamps must include both started_at and finished_at")
+            duration = None
+            if "started_at" in entry:
+                started = timestamp(entry["started_at"])
+                finished = timestamp(entry["finished_at"])
+                require(started <= finished <= measured_at
+                        and (run_started_at is None or started >= run_started_at),
+                        "profile timestamps must lie within the enclosing run")
+                duration = finished - started
+            if profile["kind"] == "test_cases":
+                cases = test_cases_report(data, profile, entry.get("expected_cases"))
+                collection["expected_cases"] = entry["expected_cases"]
+                completed_codes = profile["completed_exit_codes"]
+                require("run_status" in entry, "test cases require an explicit run_status")
+            else:
+                cases = junit_report(data)
+                completed_codes = (0, 1, 2)
             details["records"] = cases
             details["unsupported_metrics"] = ["cases.executed", "cases.flaky", "cases.xfail",
                                               "cases.xpass", "attempts.executed", "attempts.retries"]
             collection["report_complete"] = True
             run_status = entry.get("run_status", "completed" if exit_code is not None else "unknown")
+            require(run_status in ("completed", "aborted", "running", "unknown"), "invalid run_status")
             collection["run_status"] = run_status
             collection["test_plan_complete"] = entry.get("test_plan_complete") is True
             collection["complete"] = (collection["test_plan_complete"]
-                                      and run_status == "completed" and exit_code in (0, 1, 2))
+                                      and run_status == "completed" and exit_code in completed_codes)
             if not collection["complete"]:
                 collection["diagnostics"].append("test_plan_not_confirmed_complete")
             counts = Counter(case["status"] for case in cases)
@@ -368,9 +445,7 @@ def normalize_profile(name, profile, entry, run_dir, measured_at, wrapper_exit_c
                 if denominator:
                     add_metric(metrics, prefix + "ratios.strict_pass", counts["passed"] / denominator, measured_at)
                 add_metric(metrics, prefix + "run.last_completed_timestamp", int(measured_at), measured_at)
-            if "started_at" in entry and "finished_at" in entry:
-                duration = timestamp(entry["finished_at"]) - timestamp(entry["started_at"])
-                require(duration >= 0, "profile finished_at precedes started_at")
+            if duration is not None:
                 add_metric(metrics, prefix + "run.duration_seconds", duration, measured_at)
         else:
             functions, summary, diagnostics = cccc_report(data, entry.get("expected_files"))
@@ -415,7 +490,7 @@ def normalize_profile(name, profile, entry, run_dir, measured_at, wrapper_exit_c
         add_metric(metrics, prefix + "run.report_complete", int(collection["report_complete"]), measured_at)
         add_metric(metrics, prefix + "run.complete", int(collection["complete"]), measured_at)
         success = None
-        if (integer(exit_code) and exit_code != 0) or (integer(gate_exit) and gate_exit != 0) or (integer(wrapper_exit_code) and wrapper_exit_code != 0) or entry.get("run_status") == "aborted":
+        if (process_exit_code(exit_code) and exit_code != 0) or (process_exit_code(gate_exit) and gate_exit != 0) or (process_exit_code(wrapper_exit_code) and wrapper_exit_code != 0) or entry.get("run_status") == "aborted":
             success = 0
         elif collection["complete"] and exit_code == 0 and gate_exit in (None, 0):
             success = 1
@@ -445,7 +520,7 @@ def normalize(config, run, run_dir):
     for name, profile in config["profiles"].items():
         collection, records, series, artifact = normalize_profile(
             name, profile, run["profiles"].get(name), Path(run_dir), measured_at,
-            run.get("test_wrapper_exit_code"))
+            run.get("test_wrapper_exit_code"), timestamp(run["started_at"]))
         manifest["collection"][name] = collection
         manifest["profiles"][name] = {
             "comparison_key": digest(json_bytes({**comparison, "profiles": {name: profile},

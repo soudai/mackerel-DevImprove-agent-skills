@@ -17,10 +17,14 @@ Mackerelを活用した開発改善のためのagent Skillsを保存するリポ
 - [改善判断](skills/mackerel-dev-improve/references/decision-policy.md)：閾値、優先順位、効果検証
 - [プロジェクト設定例](skills/mackerel-dev-improve/assets/project.example.yaml)
 - [レポート変換・投稿CLI](skills/mackerel-dev-improve/references/report-tools.md)：対応範囲、JSON設定、実行手順、検証方法
+- [他リポジトリへの導入](skills/mackerel-dev-improve/references/project-adoption.md)：適合確認、CI接続、導入完了の条件
+- [共通テストJSON](skills/mackerel-dev-improve/references/portable-tests.md)：言語・ランナー別converterの入力契約
 
 ## 利用
 
 `skills/mackerel-dev-improve`フォルダー全体を、利用するagentが対応するSkill配置先へ登録してください。`SKILL.md`から必要な参照資料を読み、対象プロジェクトの言語・CI・テストランナーに合わせて導入します。
+
+同梱CLIを実行する場合はJSON設定を使います。[PHPUnit/CCCC用](skills/mackerel-dev-improve/assets/project.example.json)と[共通テストJSON用](skills/mackerel-dev-improve/assets/project.portable.example.json)を選べます。YAML例は、未実装のcoverage・負荷試験なども含む計測設計用です。対応範囲と導入条件は[他リポジトリへの導入](skills/mackerel-dev-improve/references/project-adoption.md)から確認してください。
 
 依頼例：
 
@@ -49,7 +53,9 @@ flowchart TD
 
 ## 実装状況
 
-Skillの手順・計測仕様に加え、PHPUnit 12.5のJUnit XMLとmoznion/cccc 1.8.3の全件JSONを取り込む[正規化スクリプト](skills/mackerel-dev-improve/scripts/normalize.py)を収録しています。完全性を確認した固定系列、明細、checksum付きmanifestを生成します。[実行可能なJSON設定例](skills/mackerel-dev-improve/assets/project.example.json)と[run例](skills/mackerel-dev-improve/assets/run.example.json)は、このCLI用です。既存のYAML例は引き続き、より広い計測契約の設計例です。
+Skillの手順・計測仕様に加え、PHPUnit 12.5のJUnit XML、moznion/cccc 1.8.3の全件JSON、`test-cases/v1`共通テストJSONを取り込む[正規化スクリプト](skills/mackerel-dev-improve/scripts/normalize.py)を収録しています。完全性を確認した固定系列、明細、checksum付きmanifestを生成します。共通JSONにより別言語のテスト結果も同じ集計・投稿処理を使えますが、各ランナーの生レポートからのconverterは導入先で実装・検証します。retry・shard統合・coverageを自動対応するものではありません。
+
+CLIはPython 3.11以上の標準ライブラリで動作します。CIではLinux/WindowsとPython 3.11/3.13の組合せを検証します。依存するアプリ言語やCIサービスは固定しません。
 
 Mackerelへの投稿は[投稿スクリプト](skills/mackerel-dev-improve/scripts/publish.py)で行います。[レポートツールの利用手順](skills/mackerel-dev-improve/references/report-tools.md)で、CIの単一publisher、秘密管理、API読戻しの条件を確認してください。OTelの導入、未対応ランナーの変換、ダッシュボード適用は対象プロジェクトで設定します。スクリプトのテスト合格だけを、利用先の実データ投稿やダッシュボード表示の検証済みとは扱いません。
 

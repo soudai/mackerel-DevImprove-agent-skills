@@ -1,0 +1,22 @@
+{
+  "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "base_revision": null,
+  "run_id": "example-run-001",
+  "attempt_id": "1",
+  "started_at": "2026-10-26T01:00:00Z",
+  "finished_at": "2026-10-26T01:02:00Z",
+  "working_tree_dirty": false,
+  "artifact_uri": "https://example.com/private-artifacts/example-run-001",
+  "profiles": {
+    "unit": {
+      "report": "tests.example.json",
+      "version": "1.0.0",
+      "exit_code": 1,
+      "run_status": "completed",
+      "test_plan_complete": true,
+      "expected_cases": 3,
+      "started_at": "2026-10-26T01:00:00Z",
+      "finished_at": "2026-10-26T01:01:00Z"
+    }
+  }
+}

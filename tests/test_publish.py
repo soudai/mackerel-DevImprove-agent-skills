@@ -19,6 +19,7 @@ publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 STAMP = 1792972800
 REVISION = "a" * 40
+COMPARISON_KEY = "c" * 64
 
 
 class FakeClient:
@@ -82,7 +83,7 @@ class PublishTest(unittest.TestCase):
             "mackerel_service": "example-dev", "revision": REVISION, "run_id": "42", "attempt_id": "1",
             "finished_at": datetime.fromtimestamp(STAMP, timezone.utc).isoformat(),
             "working_tree_dirty": False, "artifact_uri": "https://github.com/example/repo/actions/runs/42",
-            "profiles": {"unit": {"scope": {"kind": "junit"}}},
+            "profiles": {"unit": {"scope": {"kind": "junit"}, "comparison_key": COMPARISON_KEY}},
             "collection": {"unit": {"complete": True, "status": "complete", "report_complete": True, "success": 1}},
             "publication": {"service": "example-dev", "measurement_timestamp": STAMP},
         }
@@ -121,6 +122,54 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(self.client.metadata["note"], "keep")
         self.assertEqual(self.client.metadata["profiles"]["unit"]["run_id"], "42")
         self.assertEqual(self.client.metadata["profiles"]["unit"]["measured_at"], STAMP)
+        self.assertEqual(self.client.metadata["profiles"]["unit"]["comparison_key"], COMPARISON_KEY)
+
+    def test_language_independent_test_cases_use_the_same_metric_contract(self):
+        self.manifest["profiles"]["unit"]["scope"] = {"kind": "test_cases", "producer": "example-runner"}
+        self.write_bundle()
+        self.assertEqual(self.publish(), 0)
+        self.assertEqual(self.result()["status"], "verified")
+        self.manifest["collection"]["unit"]["success"] = None
+        self.metrics.append({"name": "tests.unit.run.success", "time": STAMP, "value": 0})
+        self.write_bundle()
+        self.assertEqual(self.publish(), 1)
+
+    def test_missing_or_invalid_profile_comparison_key_is_rejected_offline(self):
+        for invalid in (None, "", "not-a-hash", "c" * 63):
+            with self.subTest(key=invalid):
+                self.manifest["profiles"]["unit"]["comparison_key"] = invalid
+                self.write_bundle()
+                self.assertEqual(self.publish(), 1)
+                self.assertEqual(self.client.calls, [])
+
+    def test_same_profile_cannot_silently_change_measurement_definition(self):
+        self.client.metadata = {
+            "schema_version": 1, "service": "example", "environment": "development",
+            "profiles": {"unit": {"revision": "b" * 40, "run_id": "41", "attempt_id": "1",
+                                  "measured_at": STAMP - 300, "comparison_key": "d" * 64}},
+        }
+        self.assertEqual(self.publish(), 1)
+        self.assertFalse(any(method != "GET" for method, _, _ in self.client.calls))
+        self.assertIn("Profile definition changed", self.result()["diagnostic"])
+
+    def test_legacy_profile_metadata_is_upgraded_without_inventing_its_definition(self):
+        self.client.metadata = {
+            "schema_version": 1, "service": "example", "environment": "development",
+            "profiles": {"unit": {"revision": "b" * 40, "run_id": "41", "attempt_id": "1",
+                                  "measured_at": STAMP - 300}},
+        }
+        self.assertEqual(self.publish(), 0)
+        self.assertEqual(self.client.metadata["profiles"]["unit"]["comparison_key"], COMPARISON_KEY)
+
+    def test_identical_run_is_retryable_but_changed_evidence_is_not(self):
+        self.assertEqual(self.publish(), 0)
+        self.client.calls.clear()
+        self.assertEqual(self.publish(), 0)
+        self.metrics[0]["value"] = 4
+        self.write_bundle()
+        self.client.calls.clear()
+        self.assertEqual(self.publish(), 1)
+        self.assertFalse(any(method != "GET" for method, _, _ in self.client.calls))
 
     def test_org_and_generation_mismatch_never_post(self):
         self.client.org = "another-org"
@@ -155,7 +204,7 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_huge_integer_and_fractional_counts_are_rejected_without_crashing(self):
-        for invalid in (10 ** 1000, 3.5):
+        for invalid in (10 ** 1000, 2 ** 53, 2 ** 53 + 1, 3.5):
             with self.subTest(value_kind=type(invalid).__name__):
                 self.metrics[0]["value"] = invalid
                 self.write_bundle()
@@ -212,6 +261,13 @@ class PublishTest(unittest.TestCase):
                 self.assertEqual(self.publish(), 1)
                 self.assertEqual(self.result()["status"], "published_unverified")
                 self.assertFalse(any(method == "PUT" for method, _, _ in self.client.calls))
+
+    def test_readback_does_not_accept_an_adjacent_minute_with_the_same_value(self):
+        metric = {"name": "tests.unit.cases.passed", "time": STAMP, "value": 3}
+        for offset in (-60, 60):
+            with self.subTest(offset=offset):
+                response = {"metrics": [{"time": STAMP + offset, "value": 3}]}
+                self.assertFalse(publisher.metric_matches(response, metric))
 
     def test_uncertain_post_and_metadata_failure_keep_distinct_status(self):
         self.client.fail_post = True

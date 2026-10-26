@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "service": "orders",
+  "environment": "development",
+  "mackerel_service": "orders-dev-quality",
+  "profiles": {
+    "unit": {
+      "kind": "test_cases",
+      "contract": "test-cases/v1",
+      "producer": "example-runner",
+      "version": "1.0.0",
+      "converter": {"name": "example-runner-to-test-cases", "version": "1.0.0"},
+      "selection": "all unit tests, one invocation, no retries",
+      "completed_exit_codes": [0, 1]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "producer": {"name": "example-runner", "version": "1.0.0"},
+  "converter": {"name": "example-runner-to-test-cases", "version": "1.0.0"},
+  "cases": [
+    {"id": "orders::creates_order", "status": "passed"},
+    {"id": "orders::rejects_invalid_order", "status": "failed"},
+    {"id": "orders::optional_integration", "status": "skipped"}
+  ]
+}

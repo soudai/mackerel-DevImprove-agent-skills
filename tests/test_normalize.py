@@ -56,7 +56,8 @@ class NormalizeTests(unittest.TestCase):
                 "unit": {"kind": "junit", "producer": "phpunit", "version": "12.5.40",
                          "selection": "full_suite"},
                 "php_static": {"kind": "cccc", "producer": "moznion/cccc", "version": "1.8.3",
-                               "language": "php", "cognitive_limit": 15, "cyclomatic_limit": 10}}}
+                               "language": "php", "selection": "all src PHP files",
+                               "cognitive_limit": 15, "cyclomatic_limit": 10}}}
         self.run = {"revision": "a" * 40, "base_revision": None, "run_id": "123", "attempt_id": "1",
                     "started_at": "2026-10-26T01:00:00Z", "finished_at": "2026-10-26T01:01:00Z",
                     "profiles": {
@@ -293,6 +294,49 @@ class NormalizeTests(unittest.TestCase):
         _, _, metrics = self.collect()
         self.assertEqual(5, metrics["tests.unit.run.duration_seconds"])
 
+    def test_negative_signal_is_known_failure_and_not_a_complete_plan(self):
+        self.run["profiles"]["unit"]["exit_code"] = -9
+        manifest, _, metrics = self.collect()
+        self.assertEqual(-9, manifest["collection"]["unit"]["exit_code"])
+        self.assertEqual(0, metrics["tests.unit.run.success"])
+        self.assertEqual(0, metrics["tests.unit.run.complete"])
+        self.assert_no_cases(metrics)
+
+    def test_negative_wrapper_or_gate_exit_preserves_failure(self):
+        self.run["test_wrapper_exit_code"] = -15
+        manifest, _, metrics = self.collect()
+        self.assertEqual(-15, manifest["collection"]["unit"]["wrapper_exit_code"])
+        self.assertEqual(0, metrics["tests.unit.run.success"])
+        self.run["test_wrapper_exit_code"] = None
+        self.run["profiles"]["unit"]["gate_exit_code"] = -9
+        manifest, _, metrics = self.collect()
+        self.assertEqual(-9, manifest["collection"]["unit"]["gate_exit_code"])
+        self.assertEqual(0, metrics["tests.unit.run.success"])
+
+    def test_cccc_selection_must_be_pinned(self):
+        for selection in (None, "", "   "):
+            with self.subTest(selection=selection):
+                self.config["profiles"]["php_static"]["selection"] = selection
+                with self.assertRaises(normalize.InvalidInput):
+                    self.collect()
+
+    def test_profile_timestamp_pair_and_run_bounds_are_checked(self):
+        for times in (
+            {"started_at": "2026-10-26T01:00:00Z"},
+            {"finished_at": "2026-10-26T01:01:00Z"},
+            {"started_at": "2026-10-26T00:59:00Z", "finished_at": "2026-10-26T01:00:30Z"},
+            {"started_at": "2026-10-26T01:00:00Z", "finished_at": "2026-10-26T01:02:00Z"},
+        ):
+            with self.subTest(times=times):
+                entry = self.run["profiles"]["unit"]
+                entry.pop("started_at", None)
+                entry.pop("finished_at", None)
+                entry.update(times)
+                manifest, _, metrics = self.collect()
+                self.assertEqual("error", manifest["collection"]["unit"]["status"])
+                self.assert_no_cases(metrics)
+                self.assertNotIn("tests.unit.run.duration_seconds", metrics)
+
     def test_changed_sidecar_invalidates_measurement(self):
         sidecar = self.root / "version.txt"
         sidecar.write_bytes(b"cccc 1.8.3\n")
@@ -329,6 +373,147 @@ class NormalizeTests(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(1, result.returncode, result.stderr)
         self.assertTrue((self.root / "out/manifest.json").is_file())
+
+
+class PortableTestCasesTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.profile = {
+            "kind": "test_cases", "contract": "test-cases/v1",
+            "producer": "example-runner", "version": "4.2.0", "selection": "all unit tests",
+            "converter": {"name": "example-converter", "version": "1.0.0"},
+            "completed_exit_codes": [0, 1],
+        }
+        self.config = {"schema_version": 1, "service": "sample", "environment": "test",
+                       "mackerel_service": "sample-ci", "profiles": {"unit": self.profile}}
+        self.entry = {"report": "cases.json", "version": "4.2.0", "exit_code": 0,
+                      "run_status": "completed", "test_plan_complete": True, "expected_cases": 2}
+        self.run = {"revision": "a" * 40, "run_id": "1", "attempt_id": "1",
+                    "started_at": "2026-10-26T01:00:00Z", "finished_at": "2026-10-26T01:01:00Z",
+                    "profiles": {"unit": self.entry}}
+        self.report = {"schema_version": 1,
+                       "producer": {"name": "example-runner", "version": "4.2.0"},
+                       "converter": {"name": "example-converter", "version": "1.0.0"},
+                       "cases": [{"id": "suite::case[secret-parameter]", "status": "passed"},
+                                 {"id": "suite::case[other]", "status": "skipped"}]}
+
+    def collect(self):
+        (self.root / "cases.json").write_text(json.dumps(self.report), encoding="utf-8")
+        manifest, details, metrics = normalize.normalize(self.config, self.run, self.root)
+        return manifest, details, {metric["name"]: metric["value"] for metric in metrics}
+
+    def assert_incomplete(self):
+        manifest, details, metrics = self.collect()
+        self.assertEqual(0, metrics["tests.unit.run.complete"])
+        self.assertFalse(any(name.startswith("tests.unit.cases.") for name in metrics))
+        self.assertNotEqual(1, metrics.get("tests.unit.run.success"))
+        return manifest, details, metrics
+
+    def test_portable_complete_run_hashes_ids_and_preserves_known_counts(self):
+        manifest, details, metrics = self.collect()
+        self.assertEqual(1, metrics["tests.unit.run.success"])
+        self.assertEqual(2, metrics["tests.unit.cases.selected"])
+        self.assertEqual(1, metrics["tests.unit.cases.passed"])
+        self.assertEqual(1, metrics["tests.unit.cases.skipped"])
+        self.assertEqual(1, metrics["tests.unit.ratios.strict_pass"])
+        self.assertEqual(2, manifest["collection"]["unit"]["expected_cases"])
+        self.assertNotIn("secret-parameter", json.dumps(details))
+        self.assertNotIn("tests.unit.cases.executed", metrics)
+        self.assertNotIn("tests.unit.attempts.retries", metrics)
+
+    def test_portable_failed_plan_is_complete_with_a_failed_run(self):
+        self.report["cases"][1]["status"] = "error"
+        self.entry["exit_code"] = 1
+        manifest, _, metrics = self.collect()
+        self.assertTrue(manifest["collection"]["unit"]["complete"])
+        self.assertEqual(0, metrics["tests.unit.run.success"])
+        self.assertEqual(.5, metrics["tests.unit.ratios.strict_pass"])
+
+    def test_case_count_is_not_inferred_from_arrived_records(self):
+        for expected in (None, 0, 1, 3, True):
+            with self.subTest(expected=expected):
+                self.entry["expected_cases"] = expected
+                self.assert_incomplete()
+
+    def test_selected_count_alone_does_not_prove_plan_completion(self):
+        for status, plan in (("running", True), ("aborted", True), ("unknown", True), ("completed", False)):
+            with self.subTest(status=status, plan=plan):
+                self.entry.update(run_status=status, test_plan_complete=plan)
+                _, details, _ = self.assert_incomplete()
+                self.assertEqual(2, len(details["profiles"]["unit"]["records"]))
+
+    def test_run_status_and_nonterminal_exits_require_explicit_evidence(self):
+        self.entry.pop("run_status")
+        self.assert_incomplete()
+        self.entry["run_status"] = "completed"
+        for code in (None, 2, -9, 4294967295):
+            with self.subTest(code=code):
+                self.entry["exit_code"] = code
+                manifest, _, metrics = self.assert_incomplete()
+                self.assertEqual(code, manifest["collection"]["unit"]["exit_code"])
+                self.assertEqual(None if code is None else 0, metrics.get("tests.unit.run.success"))
+
+    def test_unsupported_statuses_and_retry_details_are_rejected(self):
+        for status in ("unknown", "not_run", "interrupted", "xfail", "xpass", "flaky", None):
+            with self.subTest(status=status):
+                self.report["cases"][0]["status"] = status
+                self.assert_incomplete()
+        self.report["cases"][0]["status"] = "passed"
+        self.report["cases"][0]["attempts"] = [{"status": "failed"}, {"status": "passed"}]
+        self.assert_incomplete()
+
+    def test_duplicate_ids_cannot_hide_retries_or_shard_overlap(self):
+        self.report["cases"][1]["id"] = self.report["cases"][0]["id"]
+        self.assert_incomplete()
+
+    def test_exit_zero_cannot_override_failed_records(self):
+        self.report["cases"][0]["status"] = "failed"
+        manifest, _, metrics = self.assert_incomplete()
+        self.assertIn("runner_success_disagrees_with_cases", manifest["collection"]["unit"]["diagnostics"])
+
+    def test_report_identity_schema_and_unknown_fields_are_checked(self):
+        import copy
+        original = copy.deepcopy(self.report)
+        for mutate in (
+            lambda report: report.update(schema_version=2),
+            lambda report: report.update(schema_version=True),
+            lambda report: report.update(retries=1),
+            lambda report: report["producer"].update(version="4.3.0"),
+            lambda report: report["converter"].update(version="2.0.0"),
+            lambda report: report["producer"].update(extra="unrecognized"),
+        ):
+            self.report = copy.deepcopy(original)
+            mutate(self.report)
+            self.assert_incomplete()
+
+    def test_profile_requires_pinned_converter_contract_and_exit_policy(self):
+        import copy
+        original = copy.deepcopy(self.profile)
+        for mutate in (
+            lambda profile: profile.pop("converter"),
+            lambda profile: profile.update(contract="test-cases/v2"),
+            lambda profile: profile.update(completed_exit_codes=[1]),
+            lambda profile: profile.update(completed_exit_codes=[0, 0]),
+            lambda profile: profile.update(completed_exit_codes=[0, -9]),
+            lambda profile: profile.update(completed_exit_codes=[0, True]),
+        ):
+            self.config["profiles"]["unit"] = copy.deepcopy(original)
+            mutate(self.config["profiles"]["unit"])
+            with self.assertRaises(normalize.InvalidInput):
+                self.collect()
+
+    def test_converter_and_exit_policy_changes_start_a_distinct_baseline(self):
+        first, _, _ = self.collect()
+        self.profile["converter"]["version"] = "1.0.1"
+        self.report["converter"]["version"] = "1.0.1"
+        second, _, _ = self.collect()
+        self.assertNotEqual(first["comparison_key"], second["comparison_key"])
+        self.assertNotEqual(first["profiles"]["unit"]["comparison_key"], second["profiles"]["unit"]["comparison_key"])
+        self.profile["completed_exit_codes"].append(2)
+        third, _, _ = self.collect()
+        self.assertNotEqual(second["comparison_key"], third["comparison_key"])
 
 
 if __name__ == "__main__":
