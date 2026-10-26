@@ -1,0 +1,5 @@
+/mackerel-dev-improve.zip
+/.quality/
+.env
+.env.*
+!.env.example
