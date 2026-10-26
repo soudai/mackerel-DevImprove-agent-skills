@@ -212,13 +212,14 @@ def load_bundle(bundle):
     return manifest, metrics
 
 
-def send_guards(manifest, expected, now):
+def send_guards(manifest, expected, now, use_key_organization=False):
     require(manifest.get("working_tree_dirty") is False, "Publishing requires a clean measured source tree")
     require(isinstance(manifest.get("revision"), str) and REVISION_RE.fullmatch(manifest["revision"]), "Invalid source revision")
     for field in ("revision", "run_id", "attempt_id"):
         require(isinstance(expected.get(field), str) and expected[field] and manifest.get(field) == expected[field],
                 "Current generation does not match bundle " + field)
-    require(isinstance(expected.get("org"), str) and expected["org"], "Expected organization is required")
+    if not use_key_organization:
+        require(isinstance(expected.get("org"), str) and expected["org"], "Expected organization is required")
     age = now - manifest["publication"]["measurement_timestamp"]
     require(0 <= age < 24 * 60 * 60, "Snapshot is in the future or at least 24 hours old")
     uri = manifest.get("artifact_uri")
@@ -226,6 +227,16 @@ def send_guards(manifest, expected, now):
     parsed = urlsplit(uri)
     require(parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password and not parsed.query,
             "Artifact URL must be HTTPS without credentials or query secrets")
+
+
+def key_organization(client):
+    """Bind this invocation to the key's organization without disclosing its name."""
+    response = client.request("GET", "/api/v0/org")
+    name = response.get("name") if isinstance(response, dict) else None
+    require(isinstance(name, str) and 0 < len(name) <= 255 and name == name.strip()
+            and all(ord(character) >= 32 and ord(character) != 127 for character in name),
+            "Invalid organization response")
+    return name
 
 
 def metadata_guard(metadata, manifest):
@@ -273,12 +284,15 @@ def result_writer(bundle, result, status, **fields):
 
 
 def publish(bundle, *, send=False, expected=None, create_service=False, client=None,
-            now=None, readback_attempts=3, sleep=time.sleep):
+            now=None, readback_attempts=3, sleep=time.sleep, use_key_organization=False):
     result = {"schema_version": 1, "status": "validating"}
     posted = False
     verified = False
     stage = "validation"
     try:
+        expected = dict(expected or {})
+        require(not use_key_organization or expected.get("org") is None,
+                "Choose either an expected organization or the key organization")
         manifest, metrics = load_bundle(bundle)
         result.update(revision=manifest.get("revision"), run_id=manifest.get("run_id"),
                       attempt_id=manifest.get("attempt_id"), service=manifest["mackerel_service"],
@@ -287,10 +301,12 @@ def publish(bundle, *, send=False, expected=None, create_service=False, client=N
         if not send:
             result_writer(bundle, result, "dry_run")
             return 0
-        send_guards(manifest, expected or {}, time.time() if now is None else now)
+        send_guards(manifest, expected, time.time() if now is None else now, use_key_organization)
         if client is None:
             client = Client(os.environ.get("MACKEREL_APIKEY"))
         stage = "preflight"
+        if use_key_organization:
+            expected["org"] = key_organization(client)
         org = client.request("GET", "/api/v0/org")
         require(isinstance(org, dict) and org.get("name") == expected["org"], "Mackerel organization mismatch")
         services = client.request("GET", "/api/v0/services")
@@ -389,7 +405,10 @@ def main(argv=None):
     parser.add_argument("--service")
     parser.add_argument("--send", action="store_true")
     parser.add_argument("--create-service", action="store_true")
-    parser.add_argument("--expected-org")
+    organization = parser.add_mutually_exclusive_group()
+    organization.add_argument("--expected-org")
+    organization.add_argument("--use-key-organization", action="store_true",
+                              help="Explicitly select this API key's organization without displaying its name")
     parser.add_argument("--expected-revision")
     parser.add_argument("--expected-run-id")
     parser.add_argument("--expected-attempt-id")
@@ -397,9 +416,9 @@ def main(argv=None):
     if args.check_connection:
         if args.send or args.create_service or any((args.expected_revision, args.expected_run_id, args.expected_attempt_id)):
             parser.error("--check-connection cannot be combined with publication options")
-        if not args.expected_org or not args.service:
-            parser.error("--check-connection requires --expected-org and --service")
-        return check_connection(args.expected_org, args.service)
+        if not (args.expected_org or args.use_key_organization) or not args.service:
+            parser.error("--check-connection requires an organization selection and --service")
+        return check_connection(args.expected_org, args.service, use_key_organization=args.use_key_organization)
     if args.service:
         parser.error("--service is only valid with --check-connection")
     if not args.bundle.is_dir() or args.bundle.is_symlink():
@@ -413,7 +432,7 @@ def main(argv=None):
             status = publish(args.bundle, send=args.send, create_service=args.create_service, expected={
                 "org": args.expected_org, "revision": args.expected_revision,
                 "run_id": args.expected_run_id, "attempt_id": args.expected_attempt_id,
-            })
+            }, use_key_organization=args.use_key_organization)
         finally:
             lock.unlink()
         print("Publication result saved in publication-result.json")
@@ -423,11 +442,17 @@ def main(argv=None):
         return 2
 
 
-def check_connection(expected_org, service, client=None):
+def check_connection(expected_org, service, client=None, use_key_organization=False):
     try:
+        require(not use_key_organization or expected_org is None,
+                "Choose either an expected organization or the key organization")
+        require(use_key_organization or (isinstance(expected_org, str) and expected_org),
+                "Expected organization is required")
         require(isinstance(service, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{1,62}", service), "Invalid service name")
         if client is None:
             client = Client(os.environ.get("MACKEREL_APIKEY"))
+        if use_key_organization:
+            expected_org = key_organization(client)
         org = client.request("GET", "/api/v0/org")
         require(isinstance(org, dict) and org.get("name") == expected_org, "Mackerel organization mismatch")
         services = client.request("GET", "/api/v0/services")

@@ -74,6 +74,15 @@ python3 scripts/publish.py --check-connection \
   --expected-org example-org --service orders-dev-quality
 ```
 
+利用者が「このAPIキーの所属organizationを送信先にする」と明示した場合は、`--expected-org`の代わりに`--use-key-organization`を指定できる。両方は同時指定できない。所属先はGET応答の名前を検証してプロセス内部だけで保持し、同じclientで再照合する。所属名をログ、結果ファイル、service metadataへ書き出さない。
+
+```sh
+python3 scripts/publish.py --check-connection \
+  --use-key-organization --service orders-dev-quality
+```
+
+この指定はAPIキーの所属先そのものを選択する。将来キーの所属organizationが変われば送信先も変わる。特定のorganizationへ固定する運用では従来の`--expected-org`を使う。指定がなければ所属先の自動選択は行わない。
+
 実送信は`--send`を指定し、CI側が現在の基準ブランチ・最新世代と照合したrevision/run/attemptを渡す。bundleから値をコピーして一致させるだけでは古いrunを防げない。共有サービスへのwriterはCIのconcurrency設定などで直列化する。PRの計測は成果物として保存し、基準ブランチ専用publisherへ送信させる。
 
 ```sh
@@ -82,6 +91,8 @@ python3 scripts/publish.py --bundle /workspace/artifacts/run-001/normalized \
   --expected-revision CURRENT_BASELINE_COMMIT \
   --expected-run-id CURRENT_RUN_ID --expected-attempt-id CURRENT_ATTEMPT_ID
 ```
+
+明示的にキーの所属先を選んだ実送信でも、上の`--expected-org example-org`だけを`--use-key-organization`へ置き換える。revision/run/attemptの照合、測定時刻、cleanなソース、checksum、固定系列、完全性の検査はすべて維持する。`--send`を付けないdry-runでは、`--use-key-organization`があっても通信もキーの読取りも行わない。
 
 `--create-service`は意図した新規サービスを作成するときだけ追加する。既存サービスを自動で作り直さない。送信は`working_tree_dirty=false`が明示された24時間未満のsnapshot、世代の一致、HTTPSの成果物リンク、payload checksum、固定series、計測完全性を確認する。送信先APIは`https://api.mackerelio.com`に固定し、redirectと環境proxyを使わない。
 

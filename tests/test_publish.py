@@ -237,6 +237,65 @@ class PublishTest(unittest.TestCase):
         self.assertIn("service is missing", output.getvalue())
         self.assertEqual([call[0] for call in self.client.calls], ["GET", "GET"])
 
+    def test_key_organization_dry_run_stays_offline(self):
+        with patch.object(publisher, "Client", side_effect=AssertionError("network")):
+            self.assertEqual(publisher.main(["--bundle", str(self.bundle), "--use-key-organization"]), 0)
+        self.assertEqual(self.result()["status"], "dry_run")
+
+    def test_key_organization_selection_is_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            publisher.main(["--check-connection", "--use-key-organization", "--expected-org", "example-org", "--service", "example-dev"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_key_organization_preflight_uses_only_get_and_never_discloses_name(self):
+        self.client.org = "private-organization-fixture"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            self.assertEqual(publisher.check_connection(None, "example-dev", self.client, use_key_organization=True), 0)
+        self.assertEqual([(method, path) for method, path, _ in self.client.calls], [
+            ("GET", "/api/v0/org"), ("GET", "/api/v0/org"), ("GET", "/api/v0/services"),
+        ])
+        self.assertNotIn(self.client.org, output.getvalue())
+
+    def test_key_organization_send_binds_internally_without_metadata_or_result_disclosure(self):
+        self.client.org = "private-organization-fixture"
+        self.expected.pop("org")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            self.assertEqual(self.publish(use_key_organization=True), 0)
+        self.assertEqual([(method, path) for method, path, _ in self.client.calls[:2]], [
+            ("GET", "/api/v0/org"), ("GET", "/api/v0/org"),
+        ])
+        self.assertNotIn(self.client.org, output.getvalue())
+        self.assertNotIn(self.client.org, json.dumps(self.result()))
+        self.assertNotIn(self.client.org, json.dumps(self.client.metadata))
+        self.assertNotIn(self.client.org, json.dumps(self.client.calls))
+
+    def test_invalid_key_organization_response_is_rejected_without_mutation(self):
+        self.expected.pop("org")
+        for invalid in (None, 123, [], "", "x" * 256, "private\norganization"):
+            with self.subTest(response_type=type(invalid).__name__):
+                self.client.calls.clear()
+                self.client.org = invalid
+                self.assertEqual(self.publish(use_key_organization=True), 1)
+                self.assertEqual(self.result()["diagnostic"], "Invalid organization response")
+                self.assertEqual([(method, path) for method, path, _ in self.client.calls], [("GET", "/api/v0/org")])
+
+    def test_key_organization_is_rechecked_with_the_same_client(self):
+        self.expected.pop("org")
+        original = self.client.request
+        organizations = iter(["first-private-fixture", "second-private-fixture"])
+
+        def changed_response(method, path, body=None):
+            response = original(method, path, body)
+            return {"name": next(organizations)} if path == "/api/v0/org" else response
+
+        with patch.object(self.client, "request", side_effect=changed_response):
+            self.assertEqual(self.publish(use_key_organization=True), 1)
+        self.assertEqual(self.result()["diagnostic"], "Mackerel organization mismatch")
+        self.assertTrue(all(method == "GET" for method, _, _ in self.client.calls))
+        self.assertNotIn("private-fixture", json.dumps(self.result()))
+
     def test_connection_and_publication_options_cannot_be_mixed(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
             publisher.main(["--check-connection", "--send", "--expected-org", "example-org", "--service", "example-dev"])
