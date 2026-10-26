@@ -11,6 +11,8 @@ description: MackerelとOpenTelemetryで開発環境のAPM・ログ、テスト�
 
 既存のリポジトリ指示、CI、テストコマンド、計装、Mackerelのサービス対応、接続手段を確認する。既存設定を優先し、必要な不足だけを補う。[プロジェクト設定例](assets/project.example.yaml)はこのSkill独自の設定契約であり、既製ツールが自動で読む設定ファイルではない。対象のCI・ランナーに合わせて実装する。
 
+PHPUnit 12.5のJUnit XMLとmoznion/cccc 1.8.3の全件JSONには、同梱の[レポート変換・投稿CLI](references/report-tools.md)を利用できる。CLI用設定は[JSON例](assets/project.example.json)を使う。対応外の生成元・再試行・shardを既存アダプターへ押し込まず、必要な範囲を追加実装して実レポートで検証する。
+
 | モード | 行うこと | 成果物 |
 |---|---|---|
 | setup | 計装・レポート収集・正規化・投稿・ダッシュボードを構成し、試験データと実データで確認 | 設定差分、APIの読戻し結果、観測できない範囲 |
@@ -23,6 +25,7 @@ description: MackerelとOpenTelemetryで開発環境のAPM・ログ、テスト�
 ## 必要な参照だけを読む
 
 - 計測の正規化、系列設計、前後比較には [measurement-contract.md](references/measurement-contract.md)。
+- 同梱スクリプトの設定、成果物、終了コードと対応範囲には [report-tools.md](references/report-tools.md)。
 - テスト件数・再試行・カバレッジ・CRAPには [test-results.md](references/test-results.md)。
 - moznion/ccccの導入・JSON読取・対応範囲には [cccc-adapter.md](references/cccc-adapter.md)。
 - Mackerelへの投稿、ダッシュボード、agentのAPI読取には [mackerel-dashboard.md](references/mackerel-dashboard.md)。
