@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mackerel Dev Improve"
+  short_description: "テスト結果・CCCC・APMをMackerelで可視化し、根拠に基づく改善を検証する"
