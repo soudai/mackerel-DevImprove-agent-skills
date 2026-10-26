@@ -23,8 +23,11 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 API_BASE = "https://api.mackerelio.com"
 MAX_BYTES = 4 * 1024 * 1024
+MAX_INTEGER = 2 ** 53 - 1
 PROFILE_RE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 REVISION_RE = re.compile(r"(?:[a-f0-9]{40}|[a-f0-9]{64})\Z")
+COMPARISON_KEY_RE = re.compile(r"[a-f0-9]{64}\Z")
+TEST_KINDS = {"junit", "test_cases"}
 TEST_SUFFIXES = {
     "cases.selected", "cases.passed", "cases.failed", "cases.error", "cases.skipped",
     "ratios.strict_pass", "run.last_completed_timestamp", "run.duration_seconds",
@@ -166,11 +169,13 @@ def load_bundle(bundle):
     expected_states = {}
     for name, profile in profiles.items():
         require(PROFILE_RE.fullmatch(name) is not None and isinstance(profile, dict), "Invalid fixed profile")
+        require(isinstance(profile.get("comparison_key"), str)
+                and COMPARISON_KEY_RE.fullmatch(profile["comparison_key"]), "Invalid profile comparison key")
         require(isinstance(profile.get("scope"), dict), "Invalid profile scope")
         kind = profile["scope"].get("kind")
-        require(kind in ("junit", "cccc"), "Unknown metric profile kind")
-        family = "tests" if kind == "junit" else "cccc"
-        suffixes = TEST_SUFFIXES if kind == "junit" else CCCC_SUFFIXES
+        require(kind in TEST_KINDS or kind == "cccc", "Unknown metric profile kind")
+        family = "tests" if kind in TEST_KINDS else "cccc"
+        suffixes = TEST_SUFFIXES if kind in TEST_KINDS else CCCC_SUFFIXES
         state = collection.get(name)
         require(isinstance(state, dict) and type(state.get("complete")) is bool
                 and state.get("status") in ("complete", "partial", "missing", "error"), "Missing collection completeness")
@@ -180,7 +185,7 @@ def load_bundle(bundle):
         require(state["status"] not in ("missing", "error") or not state["report_complete"],
                 "Missing or invalid reports cannot be complete")
         prefix = family + "." + name + "."
-        if kind == "junit":
+        if kind in TEST_KINDS:
             expected_states[prefix + "run.complete"] = int(state["complete"])
             expected_states[prefix + "run.report_complete"] = int(state["report_complete"])
             expected_states[prefix + "run.success"] = state.get("success")
@@ -201,7 +206,8 @@ def load_bundle(bundle):
         if suffix.startswith("ratios.") or suffix.endswith("_ratio"):
             require(value <= 1, "Metric ratio is outside 0..1")
         elif suffix != "run.duration_seconds":
-            require(type(value) is int, "Counts, complexity and timestamps must be integers")
+            require(type(value) is int and value <= MAX_INTEGER,
+                    "Counts, complexity and timestamps must be integers within 0..2^53-1")
         if suffix in {"run.complete", "run.report_complete", "run.success", "analysis.complete"}:
             require(value in (0, 1), "Invalid completeness metric")
             require(type(expected_states[name]) is int and value == expected_states[name],
@@ -253,6 +259,12 @@ def metadata_guard(metadata, manifest):
             continue
         previous = existing[name]
         require(isinstance(previous, dict), "Existing profile metadata is invalid")
+        # Metadata published before comparison keys were stored remains readable.
+        # Its old definition cannot be inferred; the next successful publication
+        # records the current key. Once present, a key binds this fixed series.
+        if "comparison_key" in previous:
+            require(previous["comparison_key"] == manifest["profiles"][name]["comparison_key"],
+                    "Profile definition changed; use a new fixed profile for the new baseline")
         previous_stamp = epoch(previous.get("measured_at"))
         same_run = all(previous.get(field) == manifest.get(field) for field in ("revision", "run_id", "attempt_id"))
         require(previous_stamp <= stamp, "A newer measurement is already published")
@@ -270,7 +282,9 @@ def metric_matches(response, metric):
     for item in response["metrics"]:
         if not isinstance(item, dict) or not number(item.get("time")) or not number(item.get("value")):
             return False
-        if abs(item["time"] - metric["time"]) <= 60:
+        # A full minute away is an adjacent point, not timestamp rounding.
+        # Sub-minute tolerance still requires caller-side snapshot isolation.
+        if abs(item["time"] - metric["time"]) < 60:
             candidates.append(item)
     return len(candidates) == 1 and math.isclose(candidates[0]["value"], metric["value"], rel_tol=1e-9, abs_tol=1e-12)
 
@@ -376,6 +390,7 @@ def publish(bundle, *, send=False, expected=None, create_service=False, client=N
         for name in manifest["profiles"]:
             profiles[name] = {
                 "revision": manifest["revision"], "run_id": manifest["run_id"], "attempt_id": manifest["attempt_id"],
+                "comparison_key": manifest["profiles"][name]["comparison_key"],
                 "measured_at": manifest["publication"]["measurement_timestamp"],
                 "artifact_uri": manifest["artifact_uri"],
                 "report_completeness": manifest["collection"][name]["status"],
