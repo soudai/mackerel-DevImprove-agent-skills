@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mackerel_service": "example-infra-dev",
+  "identity": {
+    "service_name": "web-dev",
+    "service_namespace": "",
+    "environment": "development",
+    "version": null
+  },
+  "window": {"from": 1792972800, "to": 1792973700},
+  "metrics": [],
+  "host_metrics": [
+    {"name": "web_cpu_user", "host_id": "REPLACEWEBHOSTID", "metric": "cpu.user.percentage"},
+    {"name": "web_memory_used", "host_id": "REPLACEWEBHOSTID", "metric": "memory.used"},
+    {"name": "db_loadavg5", "host_id": "REPLACEDBHOSTID", "metric": "loadavg5"}
+  ],
+  "apm": {"http": false, "database": false, "sampling_context": "APM disabled; host metrics and infrastructure logs only"},
+  "logs": {"enabled": true, "severities": ["INFO", "WARN", "ERROR", "FATAL"]}
+}

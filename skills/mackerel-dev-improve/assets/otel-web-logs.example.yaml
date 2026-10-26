@@ -1,0 +1,60 @@
+# Optional overlay for Contrib 0.163.2. Load after otel-collector.example.yaml.
+# One UTF-8 JSON object per line; required timestamp, optional level/trace IDs.
+# Body remains the original JSON string for Mackerel structured-body searches.
+receivers:
+  file_log/web_access:
+    include: ["${env:WEB_ACCESS_LOG_PATH}"]
+    start_at: end
+    include_file_name: false
+    include_file_path: false
+    encoding: utf-8
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 10s
+      max_elapsed_time: 60s
+    operators:
+      - type: json_parser
+        id: web_json
+        parse_from: body
+        parse_to: attributes
+        on_error: send
+        timestamp:
+          parse_from: attributes.timestamp
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.999999999Z07:00'
+      - type: severity_parser
+        if: 'attributes.level != nil'
+        parse_from: attributes.level
+        on_error: send
+      - type: trace_parser
+        # Collector expands $$ into the literal end-of-string regex anchor.
+        if: 'attributes.trace_id != nil && attributes.span_id != nil && attributes.trace_id matches "^[0-9a-fA-F]{32}$$" && attributes.span_id matches "^[0-9a-fA-F]{16}$$" && attributes.trace_id != "00000000000000000000000000000000" && attributes.span_id != "0000000000000000"'
+        trace_id:
+          parse_from: attributes.trace_id
+        span_id:
+          parse_from: attributes.span_id
+        on_error: send
+
+processors:
+  resource/development_web:
+    attributes:
+      - key: service.name
+        value: "${env:WEB_SERVICE_NAME}"
+        action: upsert
+      - key: service.namespace
+        value: "${env:INFRA_SERVICE_NAMESPACE}"
+        action: upsert
+      - key: service.instance.id
+        value: "${env:WEB_INSTANCE_ID}"
+        action: upsert
+      - key: deployment.environment.name
+        value: "${env:INFRA_ENVIRONMENT}"
+        action: upsert
+
+service:
+  pipelines:
+    logs/development_web:
+      receivers: [file_log/web_access]
+      processors: [memory_limiter, attributes/remove_sensitive_headers, resource/development_web]
+      exporters: [otlp_http/mackerel]

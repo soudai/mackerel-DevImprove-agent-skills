@@ -21,6 +21,7 @@ Mackerelを活用した開発改善のためのagent Skillsを保存するリポ
 - [共通テストJSON](skills/mackerel-dev-improve/references/portable-tests.md)：言語・ランナー別converterの入力契約
 - [観測・比較・可視化CLI](skills/mackerel-dev-improve/references/observation-tools.md)：Mackerelのサービスメトリックス・APM・ログ取得、品質bundle比較、Dashboard API用JSON生成
 - [検証済みCollector設定](skills/mackerel-dev-improve/references/observability-setup.md)：APM・ログ・メトリックスの送信とCollector内部監視
+- [アプリ以外の観測](skills/mackerel-dev-improve/references/infrastructure-observability.md)：DB・Webアクセスログ・host/containerの収集条件と改善判断
 
 ## 利用
 
@@ -61,7 +62,7 @@ CLIはPython 3.11以上の標準ライブラリで動作します。CIではLinu
 
 Mackerelへの投稿は[投稿スクリプト](skills/mackerel-dev-improve/scripts/publish.py)で行います。[レポートツールの利用手順](skills/mackerel-dev-improve/references/report-tools.md)で、CIの単一publisher、秘密管理、API読戻しの条件を確認してください。
 
-追加の[観測・比較・可視化CLI](skills/mackerel-dev-improve/references/observation-tools.md)で、Mackerelのサービスメトリックス、HTTP/DB APM統計、trace ID付きログを範囲を限定して取得できます。ログの環境・versionを照合し、欠測・取得上限を完全な結果にしません。品質bundleの前後比較では、計測定義・対象集団・明細の整合性を確認し、テスト失敗を複雑度の低下で隠さず判定します。ダッシュボードJSONは単位を分けたwidgetと証拠へのリンクを生成します。
+追加の[観測・比較・可視化CLI](skills/mackerel-dev-improve/references/observation-tools.md)で、Mackerelのサービス／ホストメトリックス、HTTP/DB APM統計、trace ID付きログを範囲を限定して取得できます。ログの環境・versionを照合し、欠測・取得上限を完全な結果にしません。DB・Webアクセスログ・hostの観測では、明示した発生元と版を限定しない条件も扱います。品質bundleの前後比較では、計測定義・対象集団・明細の整合性を確認し、テスト失敗を複雑度の低下で隠さず判定します。ダッシュボードJSONは単位を分けたwidgetと証拠へのリンクを生成します。
 
 [Collector設定例](skills/mackerel-dev-improve/assets/otel-collector.example.yaml)はContrib 0.163.2で構文とローカル結合動作を検証しています。対象プロジェクトではアプリの計装、秘密値の除去、サービス対応、APIキー、未対応ランナーのconverter、ダッシュボード適用を設定します。スクリプトのテスト合格だけを、利用先のMackerel実データ取得・投稿やダッシュボード表示の検証済みとは扱いません。カバレッジ・変更頻度・retry台帳・性能比較の自動判定は引き続き設計段階です。
 

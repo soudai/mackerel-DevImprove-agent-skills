@@ -34,7 +34,8 @@ Mackerelのサービスメトリックス・HTTP/DB APM・ログを取得する�
 - moznion/ccccの導入・JSON読取・対応範囲には [cccc-adapter.md](references/cccc-adapter.md)。
 - Mackerelへの投稿、ダッシュボード、agentのAPI読取には [mackerel-dashboard.md](references/mackerel-dashboard.md)。
 - APM・ログ・実行時メトリックの方針には [otel-setup.md](references/otel-setup.md)、実際のCollector設定・内部監視・ログ相関には [observability-setup.md](references/observability-setup.md)。
-- 閾値、優先順位、変更の採否には [decision-policy.md](references/decision-policy.md)。
+- DB・Webアクセスログ・host/containerの収集条件には [infrastructure-observability.md](references/infrastructure-observability.md)。アプリが使う依存先と資源の飽和も診断対象にする。
+- 閾値、優先順位、DB/Web/hostも含む変更の採否には [decision-policy.md](references/decision-policy.md)。
 
 ## 判断手順
 
