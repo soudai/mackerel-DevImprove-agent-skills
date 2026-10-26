@@ -1,0 +1,90 @@
+# Skill独自の設定契約を示す例。CollectorやCCCCに直接読み込ませるファイルではない。
+# service名やprofileは説明用。実対象を検出して設定し、API接続前に確認する。
+schema_version: 1
+project:
+  service_namespace: example
+  service_name: orders
+  environment: development
+  mackerel_service: orders-dev
+  baseline_branch: main
+
+publication:
+  source: baseline_branch_ci
+  fixed_profiles: [unit, es_static, rust_static, smoke]
+  event_snapshot: true
+  preserve_measurement_timestamp: true
+  generation_guard: true
+  artifact_manifest_required: true
+  read_back: true
+  api_key_environment_variable: MACKEREL_APIKEY
+
+profiles:
+  unit:
+    kind: tests
+    report_format: junit_xml
+    producer: detect_from_repository
+    expected_shards: [unit]
+    selection: full_unit_suite
+    unexpected_pass_policy: fail
+    quarantine_policy: record_and_report
+    no_tests_policy: fail_if_tests_expected
+    preserve_first_attempt: true
+    coverage_types: [line, branch]
+  es_static:
+    kind: static
+    language: es
+    analyzer: moznion/cccc
+    input: explicit_source_manifest
+    report_format: cccc_json_full
+    function_metrics: [cognitive, cyclomatic]
+    include_children: true
+    minimum_reported_complexity: 0
+    top_mode: false
+    unsupported_metric_policy: missing
+    partial_parse_policy: report_and_invalidate_affected_scope
+  rust_static:
+    kind: static
+    language: rust
+    analyzer: moznion/cccc
+    input: explicit_source_manifest
+    report_format: cccc_json_full
+    function_metrics: [cognitive, cyclomatic]
+    include_children: true
+    minimum_reported_complexity: 0
+    top_mode: false
+  smoke:
+    kind: benchmark
+    scenario: detect_from_repository
+    repetitions: 3
+    preserve_samples: true
+    compare: [latency, errors, throughput, memory, dropped_load]
+
+decision_policy:
+  initial_mode: observe
+  ratchet_new_issues: true
+  threshold_examples:
+    # 提案値であり、採用前に各解析器・言語の意味と対象を確認する。
+    cyclomatic: {operator: gt, value: 10, scope: function}
+    cognitive_general: {operator: gt, value: 15, scope: function}
+    cognitive_cpp: {operator: gt, value: 25, scope: function}
+    npath: {operator: gt, value: 200, scope: function}
+    crap: {operator: gt, value: 30, scope: function}
+  churn:
+    window_days: 90
+    frequency_unit: pull_request
+    peer_group: architectural_layer
+    candidate_top_fraction: 0.20
+    separate_mechanical_changes: true
+  coverage_gate:
+    mode: calibrate_per_profile
+    preserve_denominators: true
+  improvement:
+    require_comparable_baseline: true
+    require_behavior_verification: true
+    record_uncertain_outcome: true
+
+dashboard:
+  sections: [measurement_health, tests, coverage, cccc, hotspots, performance]
+  link_artifacts: true
+  show_revision_and_run: true
+  percentage_display: multiply_ratio_by_100
