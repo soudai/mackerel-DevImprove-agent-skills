@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "service": "orders",
+  "environment": "development",
+  "mackerel_service": "orders-dev-quality",
+  "profiles": {
+    "unit": {
+      "kind": "junit",
+      "producer": "phpunit",
+      "version": "12.5.40",
+      "selection": "full PHPUnit suite, one invocation, no retries"
+    },
+    "php_static": {
+      "kind": "cccc",
+      "producer": "moznion/cccc",
+      "version": "1.8.3",
+      "language": "php",
+      "selection": "src PHP sources, full JSON, min=0, no cache",
+      "cognitive_limit": 15,
+      "cyclomatic_limit": 10
+    }
+  }
+}
