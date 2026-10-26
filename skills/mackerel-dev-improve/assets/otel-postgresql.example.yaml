@@ -1,0 +1,69 @@
+# Optional overlay for Contrib 0.163.2. Load only if PostgreSQL is used.
+# Explicit DB scope, dedicated read-only monitoring credentials and verified TLS.
+receivers:
+  postgresql/development:
+    endpoint: "${env:POSTGRESQL_MONITOR_ENDPOINT}"
+    transport: tcp
+    username: "${env:POSTGRESQL_MONITOR_USERNAME}"
+    password: "${env:POSTGRESQL_MONITOR_PASSWORD}"
+    connect_database: "${env:POSTGRESQL_MONITOR_DATABASE}"
+    databases: ["${env:POSTGRESQL_MONITOR_DATABASE}"]
+    collection_interval: 30s
+    timeout: 10s
+    tls:
+      insecure: false
+      insecure_skip_verify: false
+    connection_pool:
+      max_open: 2
+      max_idle: 1
+    metrics:
+      postgresql.database.locks:
+        enabled: true
+      postgresql.deadlocks:
+        enabled: true
+      postgresql.blks_hit:
+        enabled: true
+      postgresql.blks_read:
+        enabled: true
+      postgresql.temp.io:
+        enabled: true
+      postgresql.temp_files:
+        enabled: true
+      # Start with DB/server-level metrics, not a time series per table/index.
+      postgresql.blocks_read:
+        enabled: false
+      postgresql.index.scans:
+        enabled: false
+      postgresql.index.size:
+        enabled: false
+      postgresql.operations:
+        enabled: false
+      postgresql.rows:
+        enabled: false
+      postgresql.table.size:
+        enabled: false
+      postgresql.table.vacuum.count:
+        enabled: false
+
+processors:
+  resource/development_postgresql:
+    attributes:
+      - key: service.name
+        value: development-postgresql
+        action: upsert
+      - key: service.namespace
+        value: "${env:INFRA_SERVICE_NAMESPACE}"
+        action: upsert
+      - key: service.instance.id
+        value: "${env:POSTGRESQL_MONITOR_INSTANCE_ID}"
+        action: upsert
+      - key: deployment.environment.name
+        value: "${env:INFRA_ENVIRONMENT}"
+        action: upsert
+
+service:
+  pipelines:
+    metrics/development_postgresql:
+      receivers: [postgresql/development]
+      processors: [memory_limiter, resource/development_postgresql]
+      exporters: [otlp/mackerel_metrics]

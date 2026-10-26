@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "mackerel_service": "example-dev",
+  "identity": {
+    "service_name": "example",
+    "service_namespace": "example-team",
+    "environment": "development",
+    "version": "0123456789012345678901234567890123456789"
+  },
+  "window": {"from": 1792972800, "to": 1792973700},
+  "metrics": ["tests.unit.run.complete", "tests.unit.cases.failed", "cccc.backend.cognitive.p95"],
+  "apm": {"http": true, "database": true, "sampling_context": "unknown: verify SDK and Collector sampling before interpreting traffic"},
+  "logs": {"enabled": true, "severities": ["ERROR", "FATAL"]}
+}

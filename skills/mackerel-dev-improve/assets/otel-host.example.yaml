@@ -1,0 +1,46 @@
+# Optional overlay for Contrib 0.163.2. Load after otel-collector.example.yaml.
+# Run as a host agent; container/host namespace and filesystem visibility differ.
+receivers:
+  host_metrics/development:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      disk: {}
+      network: {}
+
+processors:
+  resource/development_host:
+    attributes:
+      - key: service.name
+        value: development-host
+        action: upsert
+      - key: service.namespace
+        value: "${env:INFRA_SERVICE_NAMESPACE}"
+        action: upsert
+      - key: service.instance.id
+        value: "${env:INFRA_HOST_ID}"
+        action: upsert
+      - key: host.id
+        value: "${env:INFRA_HOST_ID}"
+        action: upsert
+      - key: deployment.environment.name
+        value: "${env:INFRA_ENVIRONMENT}"
+        action: upsert
+
+service:
+  pipelines:
+    metrics/development_host:
+      receivers: [host_metrics/development]
+      processors: [memory_limiter, resource/development_host]
+      exporters: [otlp/mackerel_metrics]

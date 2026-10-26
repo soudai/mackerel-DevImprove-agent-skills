@@ -2,6 +2,8 @@
 
 実装時には対象言語・SDK・Collectorの現行対応と既存設定を確認する。以下は2026-10-26確認の構成であり、固定の全言語共通設定ファイルではない。
 
+実行できるContrib設定とローカル検証は[observability-setup.md](observability-setup.md)、APIによる観測結果取得は[observation-tools.md](observation-tools.md)を参照する。
+
 ## 信号と送信先
 
 | 信号 | 収集方法 | Mackerel側 |

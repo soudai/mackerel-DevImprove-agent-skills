@@ -22,16 +22,20 @@ description: MackerelとOpenTelemetryで開発環境のAPM・ログ、テスト�
 
 依頼に必要なモードだけ実施する。調査依頼を自動的なコード変更や外部Issue登録へ拡張しない。導入・修正が依頼されている場合は、その範囲の実装と検証まで進める。接続先や対象コードがない場合も設定案・投稿データ・検証手順を具体化し、未接続を明記する。スケジュール実行は依頼された場合に設定する。
 
+Mackerelのサービスメトリックス・HTTP/DB APM・ログを取得する場合は[観測・比較・可視化CLI](references/observation-tools.md)を使う。`observe.py`は既定で通信せず計画を生成し、`--fetch`で対象組織から読み取る。`compare.py`は品質bundleの前後比較、`dashboard.py`はDashboard API用JSONを生成する。APM・ログ・実行時メトリックスの計装には[検証済みCollector設定](references/observability-setup.md)を適合させる。
+
 ## 必要な参照だけを読む
 
 - 計測の正規化、系列設計、前後比較には [measurement-contract.md](references/measurement-contract.md)。
 - 同梱スクリプトの設定、成果物、終了コードと対応範囲には [report-tools.md](references/report-tools.md)。
+- Mackerelからの証拠取得、品質bundleの前後比較、ダッシュボード生成には [observation-tools.md](references/observation-tools.md)。
 - 新しいリポジトリやCIへの導入には [project-adoption.md](references/project-adoption.md)。他ランナーのconverterには [portable-tests.md](references/portable-tests.md)。
 - テスト件数・再試行・カバレッジ・CRAPには [test-results.md](references/test-results.md)。
 - moznion/ccccの導入・JSON読取・対応範囲には [cccc-adapter.md](references/cccc-adapter.md)。
 - Mackerelへの投稿、ダッシュボード、agentのAPI読取には [mackerel-dashboard.md](references/mackerel-dashboard.md)。
-- APM・ログ・実行時メトリックの導入には [otel-setup.md](references/otel-setup.md)。
-- 閾値、優先順位、変更の採否には [decision-policy.md](references/decision-policy.md)。
+- APM・ログ・実行時メトリックの方針には [otel-setup.md](references/otel-setup.md)、実際のCollector設定・内部監視・ログ相関には [observability-setup.md](references/observability-setup.md)。
+- DB・Webアクセスログ・host/containerの収集条件には [infrastructure-observability.md](references/infrastructure-observability.md)。アプリが使う依存先と資源の飽和も診断対象にする。
+- 閾値、優先順位、DB/Web/hostも含む変更の採否には [decision-policy.md](references/decision-policy.md)。
 
 ## 判断手順
 
@@ -42,6 +46,8 @@ description: MackerelとOpenTelemetryで開発環境のAPM・ログ、テスト�
 5. **一つの仮説に対応する変更を行う。** 外部挙動を変えるバグ修正と挙動を維持するリファクタリングを区別し、必要なら差分を分ける。
 6. **同条件で検証する。** テスト、静的解析、必要な負荷試験を再実行する。除外追加・テスト削除・閾値緩和・別関数への複雑度移動による見かけの改善を確認する。
 7. **根拠を残して判定する。** 「改善を確認」「回帰あり」「比較不能」「証拠不足」のいずれかを理由付きで返す。測定不能を成功へ丸めない。
+
+`observe.py`のcompleteはAPI取得の完了であり、計装の網羅性や改善判定ではない。ログの環境・version属性欠落、ページ上限、sampling不明を明記する。品質比較の`unchanged`は改善未確認であり、複雑度の改善だけでは振る舞い・性能の改善を断定しない。
 
 ## 運用上の不変条件
 
